@@ -1,7 +1,6 @@
 fastapi
 uvicorn
---find-links https://download.pytorch.org/whl/cpu/torch_stable.html
-torch--cpu
+torch
 transformers
 faster-whisper
 symspellpy
