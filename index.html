@@ -118,7 +118,14 @@
       if (isAudioPlaying) return;
 
       try {
-        const res = await fetch("https://cultural-bonanza-flagstone.ngrok-free.dev/api/v1/incidents/all");
+        const res = await fetch("https://cultural-bonanza-flagstone.ngrok-free.dev/api/v1/incidents/all", {
+          method: "GET",
+          headers: {
+            "ngrok-skip-browser-warning": "69420",
+            "Content-Type": "application/json"
+          }
+        });
+
         if (!res.ok) return;
         const incidents = await res.json();
 
