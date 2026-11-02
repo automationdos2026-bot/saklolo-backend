@@ -118,7 +118,7 @@
       if (isAudioPlaying) return;
 
       try {
-        const res = await fetch("http://localhost:8000/api/v1/incidents/all");
+        const res = await fetch("https://cultural-bonanza-flagstone.ngrok-free.dev/api/v1/incidents/all");
         if (!res.ok) return;
         const incidents = await res.json();
 
