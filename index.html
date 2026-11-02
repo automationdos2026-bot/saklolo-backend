@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SAKLOLO Emergency Dispatch Feed</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    body { display: flex; height: 100vh; background-color: #121212; color: #ffffff; }
+    
+    #sidebar {
+      width: 440px;
+      background: #181818;
+      display: flex;
+      flex-direction: column;
+      padding: 16px;
+      gap: 12px;
+      box-shadow: 2px 0 10px rgba(0,0,0,0.6);
+      overflow-y: auto;
+      z-index: 1000;
+    }
+    
+    .header-bar { display: flex; flex-direction: column; gap: 6px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+    .header-top { display: flex; justify-content: space-between; align-items: center; }
+    .header-title { font-size: 18px; font-weight: bold; color: #ff5252; }
+    .queue-count { background: #333; padding: 4px 8px; border-radius: 12px; font-size: 12px; color: #aaa; }
+    .live-clock { font-size: 12px; color: #64b5f6; font-weight: 500; }
+
+    .incident-box {
+      background: #242424;
+      border-radius: 10px;
+      padding: 14px;
+      border: 1px solid #3a3a3a;
+      border-left: 5px solid #e53935;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .incident-box:hover { background: #2e2e2e; }
+    .incident-box.active { border-color: #2196f3; background: #283546; }
+
+    .box-header { display: flex; justify-content: space-between; align-items: center; }
+    .category-tag { background: #d32f2f; color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
+    .incident-id { font-size: 11px; color: #888; font-weight: bold; }
+
+    .user-info { font-size: 14px; font-weight: bold; color: #ffffff; }
+    .contact-info { font-size: 12px; color: #bbb; }
+    .location-info { font-size: 12px; color: #4fc3f7; }
+    .datetime-tag { font-size: 11px; color: #ffca28; font-weight: 600; display: flex; gap: 10px; }
+
+    .transcript-section {
+      background: #1a1a1a;
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #ddd;
+      border-left: 3px solid #ffb74d;
+    }
+
+    .summary-section {
+      background: #152332;
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #90caf9;
+      border-left: 3px solid #2196f3;
+    }
+
+    .summary-section pre { white-space: pre-wrap; font-family: inherit; font-size: 11px; margin-top: 4px; color: #e1f5fe; }
+    
+    audio { width: 100%; margin-top: 6px; height: 32px; }
+    #map { flex: 1; height: 100%; }
+  </style>
+</head>
+<body>
+
+  <div id="sidebar">
+    <div class="header-bar">
+      <div class="header-top">
+        <div class="header-title">🛡 SAKLOLO Dispatch Queue</div>
+        <div id="queue-counter" class="queue-count">0 Reports</div>
+      </div>
+      <div id="command-clock" class="live-clock">📅 Loading System Date & Time...</div>
+    </div>
+    
+    <div id="incident-list" style="display: flex; flex-direction: column; gap: 12px;"></div>
+  </div>
+
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([13.1391, 123.7438], 13);
+    
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    let mapMarkers = {};
+    let activeIncidentId = null;
+    let isAudioPlaying = false;
+
+    function updateLiveClock() {
+      const now = new Date();
+      const dateOptions = { year: 'numeric', month: 'long', day: 'numeric' };
+      const dateStr = now.toLocaleDateString('en-US', dateOptions);
+      const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+      document.getElementById("command-clock").innerText = `📅 ${dateStr} | 🕒 ${timeStr}`;
+    }
+    setInterval(updateLiveClock, 1000);
+    updateLiveClock();
+
+    async function fetchAllIncidents() {
+      if (isAudioPlaying) return;
+
+      try {
+        const res = await fetch("http://localhost:8000/api/v1/incidents/all");
+        if (!res.ok) return;
+        const incidents = await res.json();
+
+        document.getElementById("queue-counter").innerText = `${incidents.length} Active Reports`;
+
+        const listContainer = document.getElementById("incident-list");
+        
+        incidents.forEach((inc) => {
+          let box = document.getElementById(`box-${inc.incidentId}`);
+          
+          if (!box) {
+            box = document.createElement("div");
+            box.id = `box-${inc.incidentId}`;
+            box.className = `incident-box ${activeIncidentId === inc.incidentId ? 'active' : ''}`;
+            box.onclick = () => focusIncident(inc);
+
+            box.innerHTML = `
+              <div class="box-header">
+                <span class="category-tag">${inc.category}</span>
+                <span class="incident-id">${inc.incidentId}</span>
+              </div>
+              
+              <div class="user-info">👤 ${inc.callerName}</div>
+              <div class="contact-info">📞 ${inc.phoneNumber}</div>
+              <div class="location-info">📍 ${inc.address} (${inc.latitude}, ${inc.longitude})</div>
+              
+              <div class="datetime-tag">
+                <span>📅 ${inc.reportDate || 'Today'}</span>
+                <span>🕒 ${inc.reportTime || 'Just Now'}</span>
+              </div>
+
+              <div class="transcript-section">
+                <strong>🎙 Spoken Audio Text:</strong><br>
+                "${inc.transcription}"
+                ${inc.audioUrl ? `<audio controls src="${inc.audioUrl}" onplay="isAudioPlaying=true" onended="isAudioPlaying=false" onpause="isAudioPlaying=false"></audio>` : ''}
+              </div>
+
+              <div class="summary-section">
+                <strong>📋 Medical & Response Summary:</strong>
+                <pre>${inc.summary}</pre>
+              </div>
+            `;
+            listContainer.appendChild(box);
+          }
+
+          if (!mapMarkers[inc.incidentId]) {
+            const marker = L.marker([inc.latitude, inc.longitude]).addTo(map)
+              .bindPopup(`<b>${inc.incidentId}</b><br>${inc.callerName}<br>${inc.category}`);
+            mapMarkers[inc.incidentId] = marker;
+          }
+        });
+
+        if (incidents.length > 0 && !activeIncidentId) {
+          focusIncident(incidents[0]);
+        }
+
+      } catch (e) {
+        console.error("Error updating incident queue:", e);
+      }
+    }
+
+    function focusIncident(inc) {
+      activeIncidentId = inc.incidentId;
+      document.querySelectorAll('.incident-box').forEach(b => b.classList.remove('active'));
+      const activeBox = document.getElementById(`box-${inc.incidentId}`);
+      if (activeBox) activeBox.classList.add('active');
+
+      map.panTo([inc.latitude, inc.longitude]);
+      if (mapMarkers[inc.incidentId]) {
+        mapMarkers[inc.incidentId].openPopup();
+      }
+    }
+
+    setInterval(fetchAllIncidents, 2000);
+    fetchAllIncidents();
+  </script>
+</body>
+</html>
